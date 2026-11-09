@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "id": "CI-001",
+  "title": "Validate the public CI fixture",
+  "stage": "spec",
+  "status": "ready",
+  "risk": "low",
+  "author": "fixture-author",
+  "reviewer": "fixture-reviewer",
+  "goal": "Exercise the real harness parser and gates using public synthetic metadata.",
+  "scope": [
+    "Synthetic CI fixture only."
+  ],
+  "non_goals": [
+    "X product acceptance, private task history, database design, deployment."
+  ],
+  "specs": [
+    "docs/specs/SPEC-CI.md"
+  ],
+  "dependencies": [],
+  "acceptance": [
+    {
+      "id": "AC-1",
+      "statement": "The public fixture passes structural lint; malformed references must fail."
+    }
+  ],
+  "checks": {
+    "merge": [],
+    "close": []
+  },
+  "open_questions": [],
+  "rollback": "Revert the CI package change and rerun lint and unit tests.",
+  "closure": null
+}

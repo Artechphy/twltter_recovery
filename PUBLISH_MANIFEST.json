@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "purpose": "Public CI verification package; synthetic task/spec data only, not the private X project.",
+  "files": [
+    ".github/workflows/harness.yml",
+    ".gitignore",
+    "AGENTS.md",
+    "LICENSE",
+    "PUBLISH_MANIFEST.json",
+    "README.md",
+    "ci/verify_checkout.py",
+    "docs/specs/SPEC-CI.md",
+    "docs/tasks/CI-001.json",
+    "docs/templates/task.json",
+    "harness/__init__.py",
+    "harness/__main__.py",
+    "harness/core.py",
+    "harness/gates.py",
+    "harness/policy.json",
+    "harness/runner.py",
+    "tests/test_ci_checkout.py",
+    "tests/test_harness.py"
+  ]
+}

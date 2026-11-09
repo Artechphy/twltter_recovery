@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "id": "X-NEW",
+  "title": "待填写：可独立验证的交付",
+  "stage": "spec",
+  "status": "planned",
+  "risk": "medium",
+  "author": "implementation-agent",
+  "reviewer": "review-agent",
+  "goal": "待填写：目标与用户可观察结果",
+  "scope": ["待填写：本次包含的行为"],
+  "non_goals": ["待填写：本次排除的行为"],
+  "specs": [],
+  "dependencies": [],
+  "acceptance": [{"id": "AC-1", "statement": "待填写：可被反例否定的完成条件"}],
+  "checks": {"merge": [], "close": []},
+  "open_questions": [],
+  "rollback": "待填写：如何恢复及验证",
+  "closure": null
+}
