@@ -158,7 +158,7 @@ def policy(root: Path) -> dict:
     return obj
 
 
-def validate_task(root: Path, obj: Any, config: dict, label: str) -> dict:
+def validate_task(root: Path, obj: Any, config: dict, label: str, *, audit_evidence: bool = True) -> dict:
     exact(obj, TASK_KEYS, label)
     require(type(obj["version"]) is int and obj["version"] == 1, f"{label}: version must be 1")
     require(isinstance(obj["id"], str) and bool(IDENTIFIER.fullmatch(obj["id"])), f"{label}: invalid task ID")
@@ -196,8 +196,9 @@ def validate_task(root: Path, obj: Any, config: dict, label: str) -> dict:
     if obj["status"] == "done":
         require(obj["closure"] is not None, f"{label}: done requires a close gate report")
         report_path(root, obj["closure"])
-        closure = exact(load_json(root, obj["closure"]), GATE_KEYS, f"{label}.closure")
-        require(type(closure["version"]) is int and closure["version"] == 1 and closure["kind"] == "gate" and closure["phase"] == "close" and closure["status"] == "PASS" and closure["task_id"] == obj["id"] and closure["reasons"] == [], f"{label}: invalid close gate report")
+    if obj["status"] == "done" and audit_evidence:
+        closure = evidence_record(load_json(root, obj["closure"]), GATE_KEYS, f"{label}.closure")
+        require(closure["kind"] == "gate" and closure["phase"] == "close" and closure["status"] == "PASS" and closure["task_id"] == obj["id"] and closure["reasons"] == [], f"{label}: invalid close gate report")
         closed_revision = validate_revision(closure["revision"])
         require(closed_revision["head"] is not None and closed_revision["head"] == closed_revision["base"] and closed_revision["dirty"] is False, f"{label}: close report lacks merged Git identity")
         require(isinstance(closure["inputs"], list) and bool(closure["inputs"]), f"{label}: close report lacks evidence")
@@ -219,11 +220,11 @@ def validate_task(root: Path, obj: Any, config: dict, label: str) -> dict:
     return obj
 
 
-def tasks(root: Path, config: dict) -> dict[str, dict]:
+def tasks(root: Path, config: dict, *, audit_evidence: bool = True) -> dict[str, dict]:
     result = {}
     for file in sorted((root / "docs/tasks").glob("*.json")):
         rel = file.relative_to(root).as_posix()
-        task = validate_task(root, load_json(root, rel), config, rel)
+        task = validate_task(root, load_json(root, rel), config, rel, audit_evidence=audit_evidence)
         require(task["id"] not in result, f"duplicate task ID: {task['id']}")
         require(file.stem == task["id"], f"{rel}: filename must match task ID")
         result[task["id"]] = task
@@ -263,9 +264,9 @@ def spec_metadata(root: Path, path: str) -> dict:
     return obj
 
 
-def lint(root: Path) -> dict:
+def lint(root: Path, *, structure_only: bool = False) -> dict:
     config = policy(root)
-    ledger = tasks(root, config)
+    ledger = tasks(root, config, audit_evidence=not structure_only)
     spec_ids = set()
     specs = list((root / "docs/specs").glob("*.md"))
     require(bool(specs), "docs/specs: at least one behavior spec is required")
@@ -285,8 +286,13 @@ def lint(root: Path) -> dict:
                 continue
             target = (file.parent / link.split("#")[0]).resolve()
             require(target.is_relative_to(root), f"{file.relative_to(root)}: link escapes root: {link}")
+            if structure_only and target.is_relative_to(root / REPORT_DIR):
+                continue
             require(target.exists(), f"{file.relative_to(root)}: broken link: {link}")
-    return {"status": "PASS", "tasks": len(ledger), "specs": len(specs), "documents": len(documents)}
+    result = {"status": "PASS", "tasks": len(ledger), "specs": len(specs), "documents": len(documents)}
+    if structure_only:
+        result.update(scope="structure-only", closure_evidence="NOT_CHECKED")
+    return result
 
 
 def excluded(path: Path) -> bool:
@@ -320,11 +326,11 @@ def git(root: Path, *args: str) -> str | None:
         return None
 
 
-def revision(root: Path, task: dict, config: dict) -> dict:
+def revision(root: Path, task: dict, config: dict, context: dict | None = None) -> dict:
     top = git(root, "rev-parse", "--show-toplevel")
     initialized = top is not None and Path(top).resolve() == root
     worktree_status = git(root, "status", "--porcelain", "--untracked-files=all") if initialized else None
-    return {
+    result = {
         "head": git(root, "rev-parse", "--verify", "HEAD") if initialized else None,
         "base": git(root, "rev-parse", "--verify", config["base_ref"] + "^{commit}") if initialized else None,
         "base_ref": config["base_ref"],
@@ -334,10 +340,22 @@ def revision(root: Path, task: dict, config: dict) -> dict:
         "task_sha256": sha_bytes(canonical(task)),
         "policy_sha256": sha_bytes(canonical(config)),
     }
+    if context is not None:
+        from .ci import validate_context, validate_provenance
+        identity = validate_context(context["revision"])
+        validate_provenance(context["provenance"], identity)
+        result.update(base=identity["base_head"], context=identity)
+    return result
 
 
 def validate_revision(obj: Any) -> dict:
-    exact(obj, REVISION_KEYS, "revision")
+    extra = {"context"} if isinstance(obj, dict) and "context" in obj else set()
+    exact(obj, REVISION_KEYS | extra, "revision")
+    if extra:
+        from .ci import validate_context
+        validate_context(obj["context"])
+        require(obj["base"] == obj["context"]["base_head"], "revision base differs from CI context")
+        require(obj["head"] == obj["context"]["tested_head"], "revision HEAD differs from CI tested checkout")
     for key in ("tree_sha256", "task_sha256", "policy_sha256"):
         require(isinstance(obj[key], str) and bool(re.fullmatch(r"[0-9a-f]{64}", obj[key])), f"revision.{key}: invalid hash")
     for key in ("head", "base"):
@@ -345,6 +363,21 @@ def validate_revision(obj: Any) -> dict:
     for key in ("base_ref", "branch"):
         require((obj[key] is None and key == "branch") or (isinstance(obj[key], str) and bool(obj[key])), f"revision.{key}: invalid ref")
     require(obj["dirty"] is None or type(obj["dirty"]) is bool, "revision.dirty: invalid state")
+    return obj
+
+
+def evidence_version(current: dict) -> int:
+    return 2 if "context" in current else 1
+
+
+def evidence_record(obj: Any, keys: set[str], label: str) -> dict:
+    require(isinstance(obj, dict) and type(obj.get("version")) is int and obj["version"] in (1, 2), f"{label}: unsupported evidence version")
+    exact(obj, keys | ({"provenance"} if obj["version"] == 2 else set()), label)
+    current = validate_revision(obj["revision"])
+    require(obj["version"] == evidence_version(current), f"{label}: evidence version/context mismatch")
+    if obj["version"] == 2:
+        from .ci import validate_provenance
+        validate_provenance(obj["provenance"], current["context"])
     return obj
 
 

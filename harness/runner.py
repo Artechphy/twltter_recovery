@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .core import (exact, load_json, new_json, now, policy,
                    report_path, require, required_checks, revision, tasks,
-                   validate_revision)
+                   validate_revision, evidence_record, evidence_version)
 
 CHECK_KEYS = {"check_id", "argv", "timeout_seconds", "result_format", "status", "reason", "returncode", "timed_out", "started_at", "finished_at", "stdout", "stderr", "test_counts"}
 REPORT_KEYS = {"version", "kind", "run_id", "task_id", "phase", "status", "revision", "finished_revision", "started_at", "finished_at", "checks"}
@@ -22,6 +22,15 @@ def command(check: dict) -> list[str] | None:
     if check["argv"] is None:
         return None
     return [sys.executable if item == "{python}" else item for item in check["argv"]]
+
+
+def matches_command(argv: list[str] | None, definition: dict, *, portable_python: bool) -> bool:
+    registered = definition["argv"]
+    if not portable_python or registered is None or argv is None:
+        return argv == command(definition)
+    return (len(argv) == len(registered)
+            and all((Path(actual).is_absolute() if token == "{python}" else actual == token)
+                    for actual, token in zip(argv, registered)))
 
 
 def unittest_counts(output: str) -> dict | None:
@@ -94,7 +103,8 @@ def run_one(root: Path, name: str, check: dict) -> dict:
     return result
 
 
-def run_checks(root: Path, task_id: str, phase: str, output: str, selected: list[str] | None = None) -> dict:
+def run_checks(root: Path, task_id: str, phase: str, output: str, selected: list[str] | None = None,
+               context: dict | None = None) -> dict:
     file = report_path(root, output)
     require(not file.exists(), f"refusing to overwrite: {output}")
     config = policy(root)
@@ -104,15 +114,17 @@ def run_checks(root: Path, task_id: str, phase: str, output: str, selected: list
     names = selected if selected is not None else required_checks(task, config, phase)
     require(bool(names) and len(names) == len(set(names)), "select at least one unique check")
     require(set(names) <= set(config["checks"]), "unknown check ID")
-    before = revision(root, task, config)
-    report = {"version": 1, "kind": "checks", "run_id": uuid.uuid4().hex, "task_id": task_id, "phase": phase,
+    before = revision(root, task, config, context)
+    report = {"version": evidence_version(before), "kind": "checks", "run_id": uuid.uuid4().hex, "task_id": task_id, "phase": phase,
               "status": "PASS", "revision": before, "finished_revision": None, "started_at": now(), "finished_at": None, "checks": []}
+    if context is not None:
+        report["provenance"] = context["provenance"]
     for name in names:
         result = run_one(root, name, config["checks"][name])
         report["checks"].append(result)
         if result["reason"] == "INTERRUPTED":
             break
-    after = revision(root, task, config)
+    after = revision(root, task, config, context)
     report["finished_revision"] = after
     if before != after:
         report["status"] = "FAIL"
@@ -127,8 +139,8 @@ def run_checks(root: Path, task_id: str, phase: str, output: str, selected: list
 
 def validate_report(root: Path, path: str, task_id: str, phase: str, current: dict, config: dict | None) -> dict:
     report_path(root, path)
-    obj = exact(load_json(root, path), REPORT_KEYS, path)
-    require(type(obj["version"]) is int and obj["version"] == 1 and obj["kind"] == "checks", f"{path}: not a v1 check report")
+    obj = evidence_record(load_json(root, path), REPORT_KEYS, path)
+    require(obj["kind"] == "checks", f"{path}: not a check report")
     require(isinstance(obj["run_id"], str) and bool(re.fullmatch(r"[0-9a-f]{32}", obj["run_id"])), f"{path}: invalid run ID")
     require(obj["task_id"] == task_id and obj["phase"] == phase, f"{path}: wrong task or phase")
     require(obj["status"] in ("PASS", "FAIL", "BLOCKED"), f"{path}: invalid report status")
@@ -146,7 +158,8 @@ def validate_report(root: Path, path: str, task_id: str, phase: str, current: di
         require(item["result_format"] in ("exit-code", "unittest"), f"{path}: invalid result format")
         require(item["argv"] is None or (isinstance(item["argv"], list) and bool(item["argv"]) and all(isinstance(arg, str) and bool(arg.strip()) for arg in item["argv"])), f"{path}: invalid command argv")
         definition = config["checks"][name] if config is not None else item
-        require(item["argv"] == command(definition) and item["timeout_seconds"] == definition["timeout_seconds"] and item["result_format"] == definition["result_format"], f"{path}: command metadata does not match registered check {name}")
+        require(matches_command(item["argv"], definition, portable_python=obj["version"] == 2)
+                and item["timeout_seconds"] == definition["timeout_seconds"] and item["result_format"] == definition["result_format"], f"{path}: command metadata does not match registered check {name}")
         require(item["status"] in ("PASS", "FAIL", "BLOCKED") and type(item["timed_out"]) is bool, f"{path}: invalid check status")
         require(item["returncode"] is None or type(item["returncode"]) is int, f"{path}: invalid return code")
         for field in ("started_at", "finished_at", "reason", "stdout", "stderr"):

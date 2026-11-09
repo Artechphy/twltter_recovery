@@ -32,5 +32,5 @@
     "integration": {"capabilities": ["database-contract", "backend", "frontend"], "merge": ["harness/lint", "product/integration", "product/build", "security/scan"], "close": ["product/integration", "delivery/smoke"]},
     "acceptance": {"capabilities": ["backend", "frontend", "browser", "staging"], "merge": ["harness/lint", "acceptance/smoke"], "close": ["acceptance/smoke", "delivery/smoke"]}
   },
-  "high_risk_paths": [".github/workflows", "harness/policy.json", "backend/src/main/java/security", "backend/src/main/java/identity", "docs/adr"]
+  "high_risk_paths": [".github/workflows", "harness/policy.json", "backend/src/main/java/security", "backend/src/main/java/identity", "docs/adr", "ci/public-package.json", "ci/export_public.py"]
 }

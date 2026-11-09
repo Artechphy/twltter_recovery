@@ -7,7 +7,7 @@ from pathlib import Path
 from .core import (GATE_KEYS, HarnessError, REPORT_DIR, exact, git, input_ref, load_json,
                    new_json, nonempty, now, policy, report_path, require,
                    required_checks, revision, spec_metadata, tasks,
-                   validate_revision, verify_ref, PLACEHOLDER)
+                   validate_revision, verify_ref, PLACEHOLDER, evidence_record, evidence_version)
 from .runner import validate_report
 
 REVIEW_KEYS = {"version", "kind", "task_id", "author", "reviewer", "independent", "round", "decision", "revision", "criteria", "findings", "summary"}
@@ -33,8 +33,9 @@ def ready_problems(root: Path, task: dict, ledger: dict, config: dict) -> list[s
     return reasons
 
 
-def effective_risk(root: Path, task: dict, config: dict) -> str:
-    changed = git(root, "diff", "--name-only", config["base_ref"], "--")
+def effective_risk(root: Path, task: dict, config: dict, current: dict | None = None) -> str:
+    base = current["base"] if current is not None and current["base"] else config["base_ref"]
+    changed = git(root, "diff", "--name-only", base, "--")
     if changed is not None:
         for path in changed.splitlines():
             if any(path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/") for prefix in config["high_risk_paths"]):
@@ -44,8 +45,8 @@ def effective_risk(root: Path, task: dict, config: dict) -> str:
 
 def validate_review(root: Path, path: str, task: dict, current: dict) -> None:
     report_path(root, path)
-    obj = exact(load_json(root, path), REVIEW_KEYS, path)
-    require(type(obj["version"]) is int and obj["version"] == 1 and obj["kind"] == "review", f"{path}: invalid review format")
+    obj = evidence_record(load_json(root, path), REVIEW_KEYS, path)
+    require(obj["kind"] == "review", f"{path}: invalid review format")
     require(obj["task_id"] == task["id"] and validate_revision(obj["revision"]) == current, f"{path}: wrong task or stale review")
     require(obj["author"] == task["author"] and obj["reviewer"] == task["reviewer"], f"{path}: identities do not match task")
     require(task["author"].strip().casefold() != task["reviewer"].strip().casefold() and obj["independent"] is True, f"{path}: independent review is required; self review is not accepted")
@@ -77,8 +78,8 @@ def validate_review(root: Path, path: str, task: dict, current: dict) -> None:
 
 def validate_approval(root: Path, path: str, task: dict, current: dict) -> None:
     report_path(root, path)
-    obj = exact(load_json(root, path), {"version", "kind", "task_id", "revision", "decision", "approver", "source"}, path)
-    require(type(obj["version"]) is int and obj["version"] == 1 and obj["kind"] == "owner-decision", f"{path}: invalid owner decision")
+    obj = evidence_record(load_json(root, path), {"version", "kind", "task_id", "revision", "decision", "approver", "source"}, path)
+    require(obj["kind"] == "owner-decision", f"{path}: invalid owner decision")
     require(obj["task_id"] == task["id"] and validate_revision(obj["revision"]) == current, f"{path}: wrong task or stale owner decision")
     require(obj["decision"] == "approved", f"{path}: owner has not approved")
     actor = nonempty(obj["approver"], "approver").strip().casefold()
@@ -121,27 +122,41 @@ def validate_delivery(root: Path, path: str, task: dict, current: dict) -> list[
     require(not PLACEHOLDER.search(delivery["source"]), "merge fact source is a template placeholder")
     require(delivery["strategy"] in ("merge", "fast-forward"), "automatic close only verifies merge/fast-forward ancestry; squash/rebase requires a future platform attestation adapter")
     report_path(root, delivery["merge_gate"])
-    accepted = exact(load_json(root, delivery["merge_gate"]), GATE_KEYS, "accepted merge gate")
-    require(type(accepted["version"]) is int and accepted["version"] == 1 and accepted["kind"] == "gate" and accepted["task_id"] == task["id"] and accepted["phase"] == "merge" and accepted["status"] == "PASS" and accepted["reasons"] == [], "delivery requires a saved passing merge gate for this task")
+    accepted = evidence_record(load_json(root, delivery["merge_gate"]), GATE_KEYS, "accepted merge gate")
+    require(accepted["kind"] == "gate" and accepted["task_id"] == task["id"] and accepted["phase"] == "merge" and accepted["status"] == "PASS" and accepted["reasons"] == [], "delivery requires a saved passing merge gate for this task")
     old = validate_revision(accepted["revision"])
     require(old["head"] is not None and old["head"] != old["base"] and old["dirty"] is False, "accepted merge gate was not bound to a committed PR candidate")
     require(isinstance(accepted["inputs"], list) and bool(accepted["inputs"]), "accepted merge gate has no input evidence")
     for ref in accepted["inputs"]:
         verify_ref(root, ref)
-    require(git(root, "merge-base", "--is-ancestor", old["head"], current["head"]) is not None, "reviewed candidate is not an ancestor of merged commit")
-    require(current["head"] == current["base"] and current["branch"] == current["base_ref"].rsplit("/", 1)[-1], "close must run on the configured target branch at the actual merged commit")
+    source = old.get("context", {}).get("source_head", old["head"])
+    require(git(root, "merge-base", "--is-ancestor", source, current["head"]) is not None, "reviewed candidate is not an ancestor of merged commit")
+    require(old["tree_sha256"] == current["tree_sha256"], "merged content differs from the reviewed/tested candidate; refresh review and checks")
+    if "context" in old:
+        require(old["context"]["event"] == "pull_request", "CI merge evidence must describe a PR candidate")
+        require(git(root, "show", "-s", "--format=%P", current["head"]) == f"{old['base']} {source}"
+                or (delivery["strategy"] == "fast-forward" and current["head"] == source), "merged commit does not match reviewed PR base/head")
+    if "context" in current:
+        ci = current["context"]
+        require(ci["event"] == "push" and current["head"] == current["base"] == ci["tested_head"], "CI close requires the actual target push checkout")
+        if "context" in old:
+            require(ci["repository"] == old["context"]["repository"] and ci["target_ref"] == old["context"]["target_ref"], "CI delivery repository/target changed")
+            require(ci["previous_head"] == old["base"], "target base changed since PR verification")
+    else:
+        require(current["head"] == current["base"] and current["branch"] == current["base_ref"].rsplit("/", 1)[-1], "close must run on the configured target branch at the actual merged commit")
     return [input_ref(root, delivery["merge_gate"]), *accepted["inputs"]]
 
 
 def gate(root: Path, task_id: str, phase: str, reports: list[str], review: str | None = None,
-         approval: str | None = None, delivery: str | None = None, output: str | None = None) -> dict:
+         approval: str | None = None, delivery: str | None = None, output: str | None = None,
+         context: dict | None = None) -> dict:
     if output:
         require(not report_path(root, output).exists(), f"refusing to overwrite: {output}")
     config = policy(root)
     ledger = tasks(root, config)
     require(task_id in ledger, f"unknown task: {task_id}")
     task = ledger[task_id]
-    current = revision(root, task, config)
+    current = revision(root, task, config, context)
     reasons = ready_problems(root, task, ledger, config)
     inputs = []
     if phase != "ready":
@@ -155,6 +170,8 @@ def gate(root: Path, task_id: str, phase: str, reports: list[str], review: str |
         except HarnessError as exc:
             reasons.append(str(exc))
         if phase == "merge":
+            if "context" in current and current["context"]["event"] != "pull_request":
+                reasons.append("CI merge requires a PR merge-candidate checkout")
             if current["head"] is not None and current["head"] == current["base"]:
                 reasons.append("candidate equals base; no separate PR candidate")
             try:
@@ -163,7 +180,7 @@ def gate(root: Path, task_id: str, phase: str, reports: list[str], review: str |
                 inputs.append(input_ref(root, review))
             except HarnessError as exc:
                 reasons.append(str(exc))
-            if effective_risk(root, task, config) in ("medium", "high"):
+            if effective_risk(root, task, config, current) in ("medium", "high"):
                 try:
                     require(approval is not None, "medium/high risk requires an actual project-owner decision")
                     validate_approval(root, approval, task, current)
@@ -177,9 +194,11 @@ def gate(root: Path, task_id: str, phase: str, reports: list[str], review: str |
                 inputs.append(input_ref(root, delivery))
             except HarnessError as exc:
                 reasons.append(str(exc))
-    result = {"version": 1, "kind": "gate", "task_id": task_id, "phase": phase,
+    result = {"version": evidence_version(current), "kind": "gate", "task_id": task_id, "phase": phase,
               "status": "BLOCKED" if reasons else "PASS", "created_at": now(),
               "revision": current, "reasons": reasons, "inputs": inputs}
+    if context is not None:
+        result["provenance"] = context["provenance"]
     if output:
         new_json(root, output, result, report=True)
     return result
