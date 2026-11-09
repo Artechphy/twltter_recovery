@@ -14,11 +14,36 @@
     "docs/templates/task.json",
     "harness/__init__.py",
     "harness/__main__.py",
+    "harness/ci.py",
     "harness/core.py",
+    "harness/evidence.py",
     "harness/gates.py",
     "harness/policy.json",
     "harness/runner.py",
+    "tests/test_ci_adapter.py",
     "tests/test_ci_checkout.py",
     "tests/test_harness.py"
-  ]
+  ],
+  "source_sha256": {
+    ".github/workflows/harness.yml": "30a3834d5469ceb7656010d9cb8035e93b4ded884f2fed02feed2c0e59d14bf7",
+    ".gitignore": "fb51e515efd64f2bde066582dc1a2f51044a7e27c2e6ae8fb9d83ee0d53413be",
+    "AGENTS.md": "36fccc2e5c3ba000f2655fc27c71d4497104642e244d4ad329102b39549b3a9c",
+    "LICENSE": "4eff3742816cc3ad1b3d0378535902369bd849a6d1919a91fe2299fae123e2dd",
+    "README.md": "c38c6d2f802804cc4a4c13e02537ebbda3f612aef1a6f2f166952ebdfe133a0f",
+    "ci/verify_checkout.py": "9600ecf1e10152990a7ca618e8756966a44369c9b18a2f853a2733c9231a5975",
+    "docs/specs/SPEC-CI.md": "349c7e7d28cc1da5a5095896b47dd1d49aee5a9eb7c2556cd6f2fa4d36255c4d",
+    "docs/tasks/CI-001.json": "bb5f5c2510450c2555bbdd9bb129d31f142a25d73a9f3ae3959979c4df655460",
+    "docs/templates/task.json": "42f5a6875970a4e542093b3508ff6593b71330b1aeb199921912d2575d88f121",
+    "harness/__init__.py": "5423425b2fe7da8ce05843faca11cd6aa68a1c59be0e13b0d8eaf389e221ec3d",
+    "harness/__main__.py": "46d4c0adf7fad66cc4540bc411dbeb53bc968225fa6c717d3040d1e24884c0d8",
+    "harness/ci.py": "78f4c505a02ac16c2a16e69ab4791220e3576c009260bb52f13ea66821ad3da1",
+    "harness/core.py": "cade6ba9a2d659c468510c9e1ac06cc853f5931b856da9e17ccbbc9d1cc937ed",
+    "harness/evidence.py": "f18b595f3e952e3c0d02b06618be0b676178e32ef2941669de386221352dfa77",
+    "harness/gates.py": "ce906f96eafa397ab4cee337384d26cca2a9709cafb55cf74a663dcd23caf350",
+    "harness/policy.json": "458c675a0d15640c9e951e3802b11ffa40a8f12ff83722aab7b44900b097db39",
+    "harness/runner.py": "f1b8f2ea4d0b3b89c24299e540df382bf68a6451d83f6283b286e089338f97e8",
+    "tests/test_ci_adapter.py": "c16b78d43296d5f701f3a9fb1afc100c6b46bc9f3f7a1df854474253ec5675c2",
+    "tests/test_ci_checkout.py": "63e88db66b1d9629447d9379261ef2d90edc0847038e22400f6cabdd9e8ebe11",
+    "tests/test_harness.py": "144805f895edba034d65f814ae1983a8bc8603ede18c99f7f8e8bb96be83faea"
+  }
 }

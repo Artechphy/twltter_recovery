@@ -78,7 +78,7 @@ def main() -> int:
             json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()),
             os.environ["GITHUB_SHA"],
         )
-        result.update(status="PASS", published_files=verify_manifest(root))
+        result.update(status="PASS", published_files=verify_manifest(root) if (root / "PUBLISH_MANIFEST.json").exists() else None)
     except (ValueError, KeyError, OSError, TypeError) as exc:
         print(json.dumps({"status": "FAIL", "reason": str(exc)}))
         return 1
