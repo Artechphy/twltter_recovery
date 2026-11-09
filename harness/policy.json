@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "base_ref": "main",
+  "capabilities": {
+    "harness": {"status": "available", "reason": "Python 标准库 CLI、lint 和自身测试已提供；实际结果见运行证据。"},
+    "database-contract": {"status": "deferred", "reason": "用户明确排除本轮数据库设计；后续业务实现仍需真实契约。"},
+    "api-contract": {"status": "not_configured", "reason": "GraphQL SDL、operations 与兼容性基线尚未实现。"},
+    "backend": {"status": "not_configured", "reason": "Spring Boot 业务模块与测试工具链尚未初始化。"},
+    "frontend": {"status": "not_configured", "reason": "客户端与组件测试尚未初始化。"},
+    "browser": {"status": "not_configured", "reason": "尚无应用入口、Playwright 套件和执行环境。"},
+    "staging": {"status": "not_configured", "reason": "尚无实际部署环境、合并后业务 smoke 或平台证明适配器。"}
+  },
+  "checks": {
+    "harness/lint": {"argv": ["{python}", "-m", "harness", "lint"], "timeout_seconds": 30, "result_format": "exit-code", "description": "任务图、规约结构、策略与本地链接检查。"},
+    "harness/unit": {"argv": ["{python}", "-m", "unittest", "discover", "-s", "tests", "-v"], "timeout_seconds": 180, "result_format": "unittest", "description": "Harness 的单元测试与临时 Git/CLI 确定性验证；不代表 X 业务测试。"},
+    "graphql/contract": {"argv": null, "timeout_seconds": 120, "result_format": "exit-code", "description": "待接入真实 schema build、兼容性与 operation 校验。"},
+    "database/contract": {"argv": null, "timeout_seconds": 120, "result_format": "exit-code", "description": "仅保留未来数据库契约检查接口；本轮无数据库设计或迁移实现。"},
+    "backend/unit": {"argv": null, "timeout_seconds": 180, "result_format": "exit-code", "description": "待接入实际领域/服务单元测试。"},
+    "backend/integration": {"argv": null, "timeout_seconds": 300, "result_format": "exit-code", "description": "待接入实际 repository/service 集成测试。"},
+    "frontend/test": {"argv": null, "timeout_seconds": 180, "result_format": "exit-code", "description": "待接入实际组件、状态和交互测试。"},
+    "product/build": {"argv": null, "timeout_seconds": 300, "result_format": "exit-code", "description": "待接入实际应用构建。"},
+    "product/integration": {"argv": null, "timeout_seconds": 300, "result_format": "exit-code", "description": "待接入真实依赖的跨模块验证。"},
+    "acceptance/smoke": {"argv": null, "timeout_seconds": 300, "result_format": "exit-code", "description": "待接入关键 Playwright 用户路径，失败后重试不能掩盖 flaky。"},
+    "delivery/smoke": {"argv": null, "timeout_seconds": 180, "result_format": "exit-code", "description": "待接入实际合并/部署版本的 smoke。"},
+    "security/scan": {"argv": null, "timeout_seconds": 180, "result_format": "exit-code", "description": "待选型真实 secrets/dependency 扫描器；没有空成功脚本。"}
+  },
+  "stages": {
+    "spec": {"capabilities": [], "merge": ["harness/lint", "harness/unit"], "close": ["harness/lint", "harness/unit"]},
+    "contract": {"capabilities": [], "merge": ["harness/lint", "graphql/contract"], "close": ["graphql/contract", "delivery/smoke"]},
+    "backend": {"capabilities": ["database-contract", "api-contract"], "merge": ["harness/lint", "graphql/contract", "database/contract", "backend/unit", "backend/integration", "product/build", "security/scan"], "close": ["backend/integration", "delivery/smoke"]},
+    "frontend": {"capabilities": ["api-contract", "backend"], "merge": ["harness/lint", "graphql/contract", "frontend/test", "product/build"], "close": ["frontend/test", "delivery/smoke"]},
+    "integration": {"capabilities": ["database-contract", "backend", "frontend"], "merge": ["harness/lint", "product/integration", "product/build", "security/scan"], "close": ["product/integration", "delivery/smoke"]},
+    "acceptance": {"capabilities": ["backend", "frontend", "browser", "staging"], "merge": ["harness/lint", "acceptance/smoke"], "close": ["acceptance/smoke", "delivery/smoke"]}
+  },
+  "high_risk_paths": [".github/workflows", "harness/policy.json", "backend/src/main/java/security", "backend/src/main/java/identity", "docs/adr"]
+}
