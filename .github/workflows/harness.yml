@@ -27,6 +27,8 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m harness lint --structure-only
+      - name: Audit full task and closure evidence
+        run: python -m harness lint
   selftest:
     name: harness/selftest
     runs-on: ubuntu-latest

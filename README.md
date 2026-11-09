@@ -24,7 +24,7 @@ Actions are pinned to exact official commits; checkout does not retain credentia
 
 ## What Actions check
 
-1. `harness/spec`: `python -m harness lint --structure-only` against this public fixture; output explicitly marks historical closure evidence NOT_CHECKED.
+1. `harness/spec`: run explicit structural lint (closure evidence NOT_CHECKED), then default full `python -m harness lint` against the public fixture. Missing historical closure evidence still fails the full audit.
 2. `harness/selftest`: `python -m unittest discover -s tests -v` on Ubuntu/Python 3.11.
 3. `harness/merge`: after both pass, run the native `harness ci-context` adapter and verify the checkout SHA matches the event;
    for PRs, check the GitHub merge candidate has exactly the expected base/head parents;

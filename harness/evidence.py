@@ -99,6 +99,10 @@ def unpack(root: Path, bundle: str, expected_sha256: str | None = None) -> dict:
         target = report_path(root, path)
         require(path == target.relative_to(root).as_posix(), "bundle entry path must be canonical")
         require(target != file and path not in decoded, "duplicate/self-referencing bundle path")
+        for parent in target.parents:
+            if parent == root:
+                break
+            require(not parent.exists() or parent.is_dir(), f"evidence parent is not a directory: {path}")
         require(isinstance(entry["data"], str), "invalid encoded evidence")
         try:
             data = base64.b64decode(entry["data"], validate=True)
@@ -111,6 +115,9 @@ def unpack(root: Path, bundle: str, expected_sha256: str | None = None) -> dict:
             require(target.is_file() and target.read_bytes() == data, f"refusing to overwrite different evidence: {path}")
         decoded[path], parsed[path] = data, record
     require(sum(map(len, decoded.values())) <= MAX_BYTES, "decoded bundle exceeds 32 MiB")
+    targets = {root / path for path in decoded}
+    require(not any(parent in targets for target in targets for parent in target.parents),
+            "bundle path is both a file and a directory")
     require(set(obj["roots"]) <= set(decoded), "bundle is missing a root record")
     # Resolve references against the bundle itself before writing anything.
     check_links(root, parsed, decoded)

@@ -139,9 +139,9 @@ def validate_delivery(root: Path, path: str, task: dict, current: dict) -> list[
     if "context" in current:
         ci = current["context"]
         require(ci["event"] == "push" and current["head"] == current["base"] == ci["tested_head"], "CI close requires the actual target push checkout")
-        if "context" in old:
-            require(ci["repository"] == old["context"]["repository"] and ci["target_ref"] == old["context"]["target_ref"], "CI delivery repository/target changed")
-            require(ci["previous_head"] == old["base"], "target base changed since PR verification")
+        require("context" in old, "CI close requires a CI PR gate bound to its repository/target")
+        require(ci["repository"] == old["context"]["repository"] and ci["target_ref"] == old["context"]["target_ref"], "CI delivery repository/target changed")
+        require(ci["previous_head"] == old["base"], "target base changed since PR verification")
     else:
         require(current["head"] == current["base"] and current["branch"] == current["base_ref"].rsplit("/", 1)[-1], "close must run on the configured target branch at the actual merged commit")
     return [input_ref(root, delivery["merge_gate"]), *accepted["inputs"]]

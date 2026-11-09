@@ -141,6 +141,20 @@ class ActionsIdentityTests(CIWorkspace):
         with self.assertRaises(HarnessError):
             github_context(self.root, "main", {})
 
+    def test_manual_feature_diagnostics_do_not_authorize_merge(self):
+        self.prepare_pr()
+        self.git("checkout", "--detach", self.source)
+        self.env.update(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REF="refs/heads/feature/fixture", GITHUB_SHA=self.source)
+        self.write(".harness/reports/event.json", {"repository": {"full_name": "example/harness-ci"}})
+        context = github_context(self.root, "main", self.env)
+        self.assertEqual(context["revision"]["target_ref"], "refs/heads/feature/fixture")
+        self.assertEqual(context["revision"]["event"], "workflow_dispatch")
+        run_checks(self.root, self.task["id"], "merge", ".harness/reports/manual.json", context=context)
+        self.ci_review(context)
+        result = gate(self.root, self.task["id"], "merge", [".harness/reports/manual.json"],
+                      ".harness/reports/review.json", ".harness/reports/owner.json", context=context)
+        self.assert_blocked(result, "CI merge requires a PR")
+
 
 class ActionsGateTests(CIWorkspace):
     def test_ci_python_path_is_portable_but_registered_arguments_are_not(self):
@@ -192,6 +206,21 @@ class ActionsGateTests(CIWorkspace):
     def test_pr_run_cannot_close_task(self):
         self.prepared_merge()
         self.assert_blocked(self.close(self.context), "actual target push")
+
+    def test_ci_close_does_not_promote_unbound_local_approval(self):
+        self.prepare_pr()
+        self.git("branch", "main", self.base)
+        self.git("checkout", "feature/fixture")
+        self.report()
+        self.review()
+        self.write(".harness/reports/local-owner.json", {"version": 1, "kind": "owner-decision", "task_id": self.task["id"],
+                   "revision": self.snapshot(), "decision": "approved", "approver": "fixture-owner",
+                   "source": "Synthetic local fixture decision, with no CI repository binding."})
+        local = self.merge_gate(approval=".harness/reports/local-owner.json", output=".harness/reports/merge.json")
+        self.assertEqual(local["status"], "PASS", local)
+        self.git("branch", "-D", "main")
+        self.actual_merge()
+        self.assert_blocked(self.close(), "CI PR gate bound")
 
     def test_post_merge_unreviewed_content_is_rejected(self):
         self.prepared_merge()
@@ -305,6 +334,25 @@ class EvidenceTransportTests(CIWorkspace):
                 unpack(dest, ".harness/reports/incoming.json")
             self.assertFalse((dest / ".harness/reports/closed.json").exists())
             self.assertEqual(conflict.read_text(), '{"existing":"different"}')
+
+    def test_file_directory_prefix_conflicts_fail_before_any_write(self):
+        self.v1_closed()
+        pack(self.root, [".harness/reports/closed.json"], ".harness/reports/bundle.json")
+        original = json.loads((self.root / ".harness/reports/bundle.json").read_text())
+        review = next(e for e in original["entries"] if e["path"] == ".harness/reports/review.json")
+        for existing_parent in (False, True):
+            with self.subTest(existing_parent=existing_parent), tempfile.TemporaryDirectory() as parent:
+                dest = self.clean_copy(parent)
+                bundle = copy.deepcopy(original)
+                bundle["entries"].append({**review, "path": ".harness/reports/a.json/nested.json"})
+                if existing_parent:
+                    (dest / ".harness/reports/a.json").write_text("Preserve this existing file.")
+                else:
+                    bundle["entries"].append({**review, "path": ".harness/reports/a.json"})
+                (dest / ".harness/reports/incoming.json").write_bytes(canonical(bundle))
+                with self.assertRaisesRegex(HarnessError, "directory"):
+                    unpack(dest, ".harness/reports/incoming.json")
+                self.assertFalse((dest / ".harness/reports/closed.json").exists())
 
     def test_structure_mode_never_changes_gate_audit(self):
         self.v1_closed()

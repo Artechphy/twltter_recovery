@@ -46,6 +46,8 @@ def validate_context(value: object) -> dict:
         require(type(obj["pull_request"]) is int and obj["pull_request"] > 0 and obj["previous_head"] is None, "invalid PR context")
     else:
         require(obj["pull_request"] is None and obj["source_head"] == obj["tested_head"] == obj["base_head"], "invalid target checkout context")
+        if obj["event"] == "workflow_dispatch":
+            require(obj["previous_head"] is None, "manual diagnostics have no push ancestry")
     return obj
 
 
@@ -95,7 +97,8 @@ def github_context(root: Path, base_ref: str, environ: dict | None = None) -> di
         else:
             require(name == "workflow_dispatch", "unsupported GitHub event")
         validate_context(context)
-        require(context["target_ref"] == "refs/heads/" + expected_branch, "CI target does not match policy base_ref")
+        if name != "workflow_dispatch":
+            require(context["target_ref"] == "refs/heads/" + expected_branch, "CI target does not match policy base_ref")
         provenance = {"provider": "github-actions", "repository": repo, "event": name,
                       "run_id": int(env["GITHUB_RUN_ID"]), "run_attempt": int(env["GITHUB_RUN_ATTEMPT"])}
         validate_provenance(provenance, context)
